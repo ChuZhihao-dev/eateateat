@@ -1,0 +1,17 @@
+{
+  "name": "what-to-eat",
+  "version": "1.0.0",
+  "description": "今天吃什么 - 移动优先的智能选餐助手",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
