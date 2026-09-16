@@ -1,6 +1,16 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// 手机 App 里网页资源是本地打包的，接口必须指向真正的服务端地址。
+// 优先级：App 内设置(localStorage) > config.js 默认值 > 同源相对路径。
+const CONFIG_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase) || '';
+let API_BASE = (localStorage.getItem('apiBase') || CONFIG_BASE || '').replace(/\/+$/, '');
+
+const isNative = () =>
+  typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform
+    ? window.Capacitor.isNativePlatform()
+    : false;
+
 const MEAL_LABELS = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', any: '不限' };
 const MEAL_ORDER = ['breakfast', 'lunch', 'dinner', 'any'];
 const MEAL_BADGE = { breakfast: 'meal-b', lunch: 'meal-l', dinner: 'meal-d' };
@@ -27,12 +37,28 @@ const AVOID_OPTIONS = [
   { v: '3', label: '3天' },
   { v: '7', label: '7天' }
 ];
-const MOOD_ICON = { any: '🎲', light: '🥗', spicy: '🌶️', heavy: '🔥', meat: '🍖', veg: '🥬', soup: '🍲', lite: '💪' };
+const MOOD_ICON = {
+  any: '🎲',
+  light: '🥗',
+  spicy: '🌶️',
+  heavy: '🔥',
+  meat: '🍖',
+  veg: '🥬',
+  soup: '🍲',
+  lite: '💪'
+};
 
 const state = {
   tab: 'recommend',
   meta: { moods: [], meals: [], suggestedMeal: 'lunch' },
-  filters: { meal: 'lunch', mood: 'any', maxPrice: '', maxCook: '', ingredients: '', avoidDays: '2' },
+  filters: {
+    meal: 'lunch',
+    mood: 'any',
+    maxPrice: '',
+    maxCook: '',
+    ingredients: '',
+    avoidDays: '2'
+  },
   results: null,
   loadingResults: false,
   loading: { dishes: false, meals: false },
@@ -45,7 +71,9 @@ const state = {
   stats: null,
   statsMonth: localMonth(),
   acc: { filters: false, mealType: true, topDishes: true, cuisine: false },
-  recordedIds: new Set()
+  recordedIds: new Set(),
+  animateView: false,
+  viewDir: ''
 };
 
 /* ============================================================
@@ -83,7 +111,16 @@ const EMOJI_RULES = [
   [/菜/, '🥬']
 ];
 
-const TAG_EMOJI = { 荤: '🍖', 素: '🥬', 清淡: '🥗', 辣: '🌶️', 汤: '🍲', 主食: '🍚', 轻食: '🥗', 重口: '🔥' };
+const TAG_EMOJI = {
+  荤: '🍖',
+  素: '🥬',
+  清淡: '🥗',
+  辣: '🌶️',
+  汤: '🍲',
+  主食: '🍚',
+  轻食: '🥗',
+  重口: '🔥'
+};
 
 function dishEmoji(dish) {
   const name = dish.name || '';
@@ -125,11 +162,14 @@ function dishTile(dish, size = 'md') {
    基础工具
    ============================================================ */
 function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined
@@ -153,7 +193,11 @@ function vibrate(ms) {
   if (navigator.vibrate) navigator.vibrate(ms);
 }
 
-const CHEV = '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+const CHEV =
+  '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+
+const SETTINGS_ICON =
+  '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>';
 
 function greeting() {
   const h = new Date().getHours();
@@ -198,10 +242,6 @@ function spicyBadge(dish) {
   if (!dish.spice) return '';
   return `<span class="badge spicy">${'🌶'.repeat(dish.spice)}</span>`;
 }
-function tagBadge(tag) {
-  const cls = tag === '荤' ? 'meat' : tag === '素' ? 'veg' : '';
-  return `<span class="badge ${cls}">${escapeHtml(tag)}</span>`;
-}
 function mealBadge(type) {
   return `<span class="badge ${MEAL_BADGE[type] || ''}">${MEAL_LABELS[type] || type}</span>`;
 }
@@ -209,14 +249,14 @@ function mealBadge(type) {
 function setAppbar({ title, sub = '', actions = '' }) {
   $('#appbar-title').textContent = title;
   $('#appbar-sub').textContent = sub;
-  $('#appbar-actions').innerHTML = actions;
+  $('#appbar-actions').innerHTML =
+    actions +
+    `<button class="icon-btn" data-action="open-settings" aria-label="设置" title="设置">${SETTINGS_ICON}</button>`;
 }
 
-function withScrollPreserved(fn) {
-  const v = $('#view');
-  const top = v.scrollTop;
-  fn();
-  v.scrollTop = top;
+function viewClass() {
+  if (!state.animateView) return '';
+  return ` view-enter${state.viewDir ? ' from-' + state.viewDir : ''}`;
 }
 
 /* ============================================================
@@ -252,7 +292,10 @@ function renderRecommend() {
   }).join('');
 
   const moodHtml = state.meta.moods
-    .map((m) => `<button class="chip ${f.mood === m.key ? 'on' : ''}" data-action="set-filter" data-key="mood" data-value="${m.key}"><span class="chip-ico">${MOOD_ICON[m.key] || '🍽️'}</span>${escapeHtml(m.label)}</button>`)
+    .map(
+      (m) =>
+        `<button class="chip ${f.mood === m.key ? 'on' : ''}" data-action="set-filter" data-key="mood" data-value="${m.key}"><span class="chip-ico">${MOOD_ICON[m.key] || '🍽️'}</span>${escapeHtml(m.label)}</button>`
+    )
     .join('');
 
   setAppbar({
@@ -261,16 +304,20 @@ function renderRecommend() {
   });
 
   $('#view').innerHTML = `
-    <div class="stack loose view-enter">
+    <div class="stack loose${viewClass()}">
       <div class="hero">
+        <div class="hero-kicker"><span></span> 今日食物电台</div>
         <div class="hero-top">
           <div>
             <div class="hero-title">${greeting()}，吃点啥？</div>
             <div class="hero-sub">挑不出来就交给运气吧</div>
           </div>
-          <div class="hero-emoji">${greetingEmoji()}</div>
+          <div class="hero-emoji" aria-hidden="true">${greetingEmoji()}</div>
         </div>
-        <div class="hero-chip">🕐 现在是${suggested}时间</div>
+        <div class="hero-foot">
+          <div class="hero-chip">🕐 现在是${suggested}时间</div>
+          <div class="hero-mark">EAT / REPEAT</div>
+        </div>
       </div>
 
       <div class="segmented">${segHtml}</div>
@@ -317,27 +364,26 @@ function renderRecommend() {
         </div></div></div>
       </div>
 
-      <div class="shuffle-wrap">
-        <button class="shuffle" id="shuffle-btn" aria-label="换一批">
-          <span class="shuffle-ring"></span>
-          <span class="shuffle-emoji">🎲</span>
-        </button>
-        <div class="shuffle-label">摇一摇 · 点我换一批</div>
-      </div>
-
       <div class="section-head">
         <div class="section-title">为你推荐</div>
-        ${state.results ? `<div class="section-sub">${state.results.context.candidateCount} 道可选</div>` : ''}
+        <div class="section-sub" id="result-count">${state.results ? `${state.results.context.candidateCount} 道可选` : ''}</div>
       </div>
 
       <div id="results">${state.loadingResults ? skeletonResults() : renderResults()}</div>
+      <div class="fab-clearance"></div>
     </div>
+    <button class="shuffle-fab${state.animateView ? ' view-enter' : ''}" id="shuffle-btn" data-action="shuffle" aria-label="换一批" title="换一批（摇一摇）">
+      <span class="shuffle-fab-ring"></span>
+      <span class="shuffle-fab-emoji">🎲</span>
+    </button>
   `;
 }
 
 function skeletonResults() {
   return `<div class="stack">
-    ${[0, 1].map(() => `
+    ${[0, 1]
+      .map(
+        () => `
       <div class="skel-card">
         <div class="skel-row">
           <div class="skel skel-tile"></div>
@@ -349,19 +395,25 @@ function skeletonResults() {
         <div class="skel skel-line w100"></div>
         <div class="skel skel-line w80"></div>
       </div>
-    `).join('')}
+    `
+      )
+      .join('')}
   </div>`;
 }
 
 function skeletonList(n = 5) {
-  return `<div class="list">${Array.from({ length: n }).map(() => `
+  return `<div class="list">${Array.from({ length: n })
+    .map(
+      () => `
     <div class="list-item">
       <div class="skel skel-tile" style="width:50px;height:50px;border-radius:14px"></div>
       <div class="grow">
         <div class="skel skel-line w60" style="margin-bottom:9px"></div>
         <div class="skel skel-line w40"></div>
       </div>
-    </div>`).join('')}</div>`;
+    </div>`
+    )
+    .join('')}</div>`;
 }
 
 function resultMeta(dish) {
@@ -380,7 +432,9 @@ function renderResults() {
     return `<div class="empty"><span class="empty-ico">🍽️</span><div class="empty-title">没有匹配的菜品</div><div class="empty-sub">放宽一些条件再试试</div></div>`;
   }
 
-  const hint = context.relaxed ? `<div class="sub" style="padding:0 2px 2px">条件有点严，已为你放宽范围</div>` : '';
+  const hint = context.relaxed
+    ? `<div class="sub" style="padding:0 2px 2px">条件有点严，已为你放宽范围</div>`
+    : '';
   const [first, ...rest] = results;
 
   return `
@@ -408,8 +462,10 @@ function renderResults() {
         </div>
       </div>
 
-      ${rest.map((r, i) => `
-        <div class="res-row" style="--d:${(i + 1) * 0.06}s">
+      ${rest
+        .map(
+          (r, i) => `
+        <div class="res-row" style="--d:${(i + 1) * 0.1}s">
           ${dishTile(r.dish, 'sm')}
           <div class="grow">
             <div class="res-name ellipsis">${escapeHtml(r.dish.name)}</div>
@@ -419,9 +475,30 @@ function renderResults() {
             ${state.recordedIds.has(r.dish.id) ? '✅' : '🍴'}
           </button>
         </div>
-      `).join('')}
+      `
+        )
+        .join('')}
     </div>
   `;
+}
+
+function updateResults() {
+  const box = $('#results');
+  if (box) box.innerHTML = renderResults();
+  const count = $('#result-count');
+  if (count)
+    count.textContent = state.results ? `${state.results.context.candidateCount} 道可选` : '';
+}
+
+function syncFilterChips() {
+  $$('#view [data-action="set-filter"]').forEach((btn) => {
+    btn.classList.toggle(
+      'on',
+      String(state.filters[btn.dataset.key]) === String(btn.dataset.value)
+    );
+  });
+  const sum = $('#view .acc-sum');
+  if (sum) sum.textContent = filterSummary();
 }
 
 async function loadRecommend() {
@@ -430,32 +507,55 @@ async function loadRecommend() {
     state.filters._init = true;
   }
   const f = state.filters;
-  const params = new URLSearchParams({ meal: f.meal, mood: f.mood, avoidDays: f.avoidDays, count: '3' });
+  const params = new URLSearchParams({
+    meal: f.meal,
+    mood: f.mood,
+    avoidDays: f.avoidDays,
+    count: '3'
+  });
   if (f.maxPrice) params.set('maxPrice', f.maxPrice);
   if (f.maxCook) params.set('maxCook', f.maxCook);
   if (f.ingredients.trim()) params.set('ingredients', f.ingredients.trim());
   state.results = await api(`/api/recommend?${params}`);
 }
 
-async function doShuffle() {
-  const btn = $('#shuffle-btn');
-  if (btn) {
-    btn.classList.add('shaking');
-    setTimeout(() => btn.classList.remove('shaking'), 560);
-  }
-  vibrate(30);
+async function reloadResults() {
+  if (state.loadingResults) return;
   state.loadingResults = true;
-  const box = $('#results');
-  if (box) box.innerHTML = skeletonResults();
   try {
     await loadRecommend();
+    updateResults();
+  } catch (e) {
+    toast(e.message);
+  } finally {
     state.loadingResults = false;
-    withScrollPreserved(() => renderRecommend());
+  }
+}
+
+async function doShuffle() {
+  if (state.loadingResults) return;
+  state.loadingResults = true;
+  const btn = $('#shuffle-btn');
+  const box = $('#results');
+  if (btn) {
+    btn.classList.remove('view-enter', 'from-left', 'from-right');
+    btn.classList.add('shaking');
+  }
+  if (box) box.classList.add('dealing');
+  vibrate(30);
+  try {
+    await Promise.all([loadRecommend(), new Promise((r) => setTimeout(r, 560))]);
   } catch (e) {
     state.loadingResults = false;
+    if (btn) btn.classList.remove('shaking');
+    if (box) box.classList.remove('dealing');
     toast(e.message);
-    if (box) box.innerHTML = renderResults();
+    return;
   }
+  state.loadingResults = false;
+  if (btn) btn.classList.remove('shaking');
+  if (box) box.classList.remove('dealing');
+  updateResults();
 }
 
 /* ============================================================
@@ -493,10 +593,12 @@ function renderDishes() {
     </div>
     <div class="hscroll">
       <button class="chip ${state.dishCuisine === '' ? 'on' : ''}" data-action="cuisine" data-value="">全部 ${all.length}</button>
-      ${cuisines.map((c) => {
-        const n = all.filter((d) => d.cuisine === c).length;
-        return `<button class="chip ${state.dishCuisine === c ? 'on' : ''}" data-action="cuisine" data-value="${escapeHtml(c)}">${escapeHtml(c)} ${n}</button>`;
-      }).join('')}
+      ${cuisines
+        .map((c) => {
+          const n = all.filter((d) => d.cuisine === c).length;
+          return `<button class="chip ${state.dishCuisine === c ? 'on' : ''}" data-action="cuisine" data-value="${escapeHtml(c)}">${escapeHtml(c)} ${n}</button>`;
+        })
+        .join('')}
     </div>
   `;
 
@@ -517,10 +619,11 @@ function renderDishes() {
     const groups = [...byCuisine.entries()].sort((a, b) => b[1].length - a[1].length);
     if (!state.openCuisines) state.openCuisines = new Set([groups[0][0]]);
 
-    bodyHtml = groups.map(([cuisine, items]) => {
-      const open = state.openCuisines.has(cuisine);
-      const [t1, t2] = cuisineTheme(cuisine);
-      return `
+    bodyHtml = groups
+      .map(([cuisine, items]) => {
+        const open = state.openCuisines.has(cuisine);
+        const [t1, t2] = cuisineTheme(cuisine);
+        return `
         <div class="group" data-open="${open ? 'true' : 'false'}">
           <button class="group-head" data-action="toggle-group" data-set="openCuisines" data-key="${escapeHtml(cuisine)}">
             <span class="group-dot" style="background:linear-gradient(135deg,${t1},${t2})"></span>
@@ -534,11 +637,12 @@ function renderDishes() {
           </div></div></div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   $('#view').innerHTML = `
-    <div class="stack view-enter">
+    <div class="stack${viewClass()}">
       ${searchHtml}
       ${bodyHtml}
     </div>
@@ -570,7 +674,9 @@ function dishItem(d) {
 function renderRecords() {
   const total = state.meals.filter((m) => m.eaten_at.slice(0, 7) === localMonth()).length;
   const rated = state.meals.filter((m) => m.rating);
-  const avg = rated.length ? (rated.reduce((s, m) => s + m.rating, 0) / rated.length).toFixed(1) : '—';
+  const avg = rated.length
+    ? (rated.reduce((s, m) => s + m.rating, 0) / rated.length).toFixed(1)
+    : '—';
 
   setAppbar({
     title: '用餐记录',
@@ -578,12 +684,13 @@ function renderRecords() {
   });
 
   if (state.loading.meals) {
-    $('#view').innerHTML = `<div class="stack view-enter">${skeletonList(5)}</div>`;
+    $('#view').innerHTML = `<div class="stack${viewClass()}">${skeletonList(5)}</div>`;
     return;
   }
 
   if (!state.meals.length) {
-    $('#view').innerHTML = `<div class="stack view-enter"><div class="empty"><span class="empty-ico">📝</span><div class="empty-title">还没有记录</div><div class="empty-sub">去「推荐」里点「就吃它」记一顿吧</div></div></div>`;
+    $('#view').innerHTML =
+      `<div class="stack${viewClass()}"><div class="empty"><span class="empty-ico">📝</span><div class="empty-title">还没有记录</div><div class="empty-sub">去「推荐」里点「就吃它」记一顿吧</div></div></div>`;
     return;
   }
 
@@ -596,10 +703,11 @@ function renderRecords() {
   if (!state.openDays) state.openDays = new Set([groups.keys().next().value]);
 
   $('#view').innerHTML = `
-    <div class="stack view-enter">
-      ${[...groups.entries()].map(([day, items]) => {
-        const open = state.openDays.has(day);
-        return `
+    <div class="stack${viewClass()}">
+      ${[...groups.entries()]
+        .map(([day, items]) => {
+          const open = state.openDays.has(day);
+          return `
           <div class="group" data-open="${open ? 'true' : 'false'}">
             <button class="group-head" data-action="toggle-group" data-set="openDays" data-key="${escapeHtml(day)}">
               <span class="group-dot"></span>
@@ -613,7 +721,8 @@ function renderRecords() {
             </div></div></div>
           </div>
         `;
-      }).join('')}
+        })
+        .join('')}
     </div>
   `;
 }
@@ -689,13 +798,14 @@ function renderStats() {
   });
 
   if (!s) {
-    $('#view').innerHTML = `<div class="stack view-enter">${skeletonResults()}</div>`;
+    $('#view').innerHTML = `<div class="stack${viewClass()}">${skeletonResults()}</div>`;
     return;
   }
 
   const { summary, topDishes, byCuisine, byMealType } = s;
   if (!summary.total_meals) {
-    $('#view').innerHTML = `<div class="stack view-enter"><div class="empty"><span class="empty-ico">📊</span><div class="empty-title">这个月还没有记录</div><div class="empty-sub">换个月份看看，或先去记一顿</div></div></div>`;
+    $('#view').innerHTML =
+      `<div class="stack${viewClass()}"><div class="empty"><span class="empty-ico">📊</span><div class="empty-title">这个月还没有记录</div><div class="empty-sub">换个月份看看，或先去记一顿</div></div></div>`;
     return;
   }
 
@@ -731,7 +841,8 @@ function renderStats() {
     </div>
   `;
 
-  const donutHtml = byMealType.length ? `
+  const donutHtml = byMealType.length
+    ? `
     <div class="donut-wrap">
       <div class="donut" style="background:${donutGradient(byMealType)}">
         <div class="donut-center">
@@ -740,18 +851,25 @@ function renderStats() {
         </div>
       </div>
       <div class="legend">
-        ${byMealType.map((b) => `
+        ${byMealType
+          .map(
+            (b) => `
           <div class="legend-item">
             <span class="dot" style="background:${MEAL_COLORS[b.meal_type] || '#94a3b8'}"></span>
             <span>${MEAL_LABELS[b.meal_type] || b.meal_type}</span>
             <span class="legend-val">${b.count} 次</span>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     </div>
-  ` : '';
+  `
+    : '';
 
-  const topHtml = topDishes.map((d) => `
+  const topHtml = topDishes
+    .map(
+      (d) => `
     <div class="bar-row" style="margin-bottom:11px">
       ${dishTile({ name: d.name, cuisine: d.cuisine, tags: [] }, 'xs')}
       <div class="grow" style="min-width:0">
@@ -762,11 +880,14 @@ function renderStats() {
         <div class="bar-track"><div class="bar-fill" style="width:${(d.count / maxTop) * 100}%"></div></div>
       </div>
     </div>
-  `).join('');
+  `
+    )
+    .join('');
 
-  const cuisineHtml = byCuisine.map((c) => {
-    const [t1, t2] = cuisineTheme(c.cuisine);
-    return `
+  const cuisineHtml = byCuisine
+    .map((c) => {
+      const [t1, t2] = cuisineTheme(c.cuisine);
+      return `
       <div class="bar-row" style="margin-bottom:11px">
         <span class="dot" style="background:linear-gradient(135deg,${t1},${t2});border-radius:6px;width:11px;height:11px"></span>
         <div class="grow" style="min-width:0">
@@ -778,10 +899,11 @@ function renderStats() {
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
   $('#view').innerHTML = `
-    <div class="stack view-enter">
+    <div class="stack${viewClass()}">
       ${statCards}
       ${donutHtml ? accordion({ key: 'mealType', icon: '🍱', title: '餐段分布', summary: `${byMealType.length} 个餐段`, inner: donutHtml, open: state.acc.mealType }) : ''}
       ${accordion({ key: 'topDishes', icon: '❤️', title: '最爱吃的菜', summary: `Top ${topDishes.length}`, inner: topHtml, open: state.acc.topDishes })}
@@ -795,7 +917,16 @@ function renderStats() {
    ============================================================ */
 function openDishSheet(dish) {
   const isNew = !dish;
-  const d = dish || { name: '', cuisine: '家常', meals: ['lunch', 'dinner'], tags: [], spice: 0, cook: 20, price: 20, ingredients: [] };
+  const d = dish || {
+    name: '',
+    cuisine: '家常',
+    meals: ['lunch', 'dinner'],
+    tags: [],
+    spice: 0,
+    cook: 20,
+    price: 20,
+    ingredients: []
+  };
 
   $('#sheet-title').textContent = isNew ? '新增菜品' : '编辑菜品';
   $('#sheet-body').innerHTML = `
@@ -853,11 +984,36 @@ function closeSheet() {
   $('#sheet').classList.add('hidden');
 }
 
+function openSettingsSheet() {
+  const nativeHint = isNative()
+    ? '手机 App 需填写运行服务端的电脑/服务器地址（含 http:// 和端口）。'
+    : '留空表示使用当前网页地址。';
+  $('#sheet-title').textContent = '设置';
+  $('#sheet-body').innerHTML = `
+    <div class="field">
+      <label>服务器地址</label>
+      <input class="input" id="s-api-base" placeholder="http://192.168.1.10:3000" value="${escapeHtml(API_BASE)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" />
+    </div>
+    <div class="sub">${nativeHint}手机与服务器需在同一网络，或使用已部署的公网地址。</div>
+    <div class="sub">当前：${API_BASE ? escapeHtml(API_BASE) : '（同源）'}</div>
+    <div class="row" style="gap:10px;margin-top:2px">
+      <button class="btn btn-primary btn-block" data-action="save-settings">保存</button>
+      ${API_BASE ? '<button class="btn btn-ghost" data-action="reset-settings">重置</button>' : ''}
+    </div>
+  `;
+  const panel = $('#sheet-panel');
+  panel.style.transform = '';
+  $('#sheet').classList.remove('hidden');
+}
+
 function collectDishForm() {
   const meals = $$('#f-meals .chip.on').map((b) => b.dataset.value);
   const tags = $$('#f-tags .chip.on').map((b) => b.dataset.value);
   const spice = Number($('#f-spice .chip.on')?.dataset.value || 0);
-  const ingredients = $('#f-ingredients').value.split(/[,，、;；\s]+/).map((s) => s.trim()).filter(Boolean);
+  const ingredients = $('#f-ingredients')
+    .value.split(/[,，、;；\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   return {
     name: $('#f-name').value.trim(),
     cuisine: $('#f-cuisine').value.trim() || '家常',
@@ -873,9 +1029,15 @@ function collectDishForm() {
 /* ============================================================
    数据加载 / 路由
    ============================================================ */
-async function loadDishes() { state.dishes = await api('/api/dishes'); }
-async function loadMeals() { state.meals = await api('/api/meals?limit=200'); }
-async function loadStats() { state.stats = await api(`/api/stats?month=${state.statsMonth}`); }
+async function loadDishes() {
+  state.dishes = await api('/api/dishes');
+}
+async function loadMeals() {
+  state.meals = await api('/api/meals?limit=200');
+}
+async function loadStats() {
+  state.stats = await api(`/api/stats?month=${state.statsMonth}`);
+}
 
 async function refreshCurrent() {
   if (state.tab === 'recommend') {
@@ -893,38 +1055,82 @@ async function refreshCurrent() {
   }
 }
 
+const TAB_ORDER = ['recommend', 'dishes', 'records', 'stats'];
+
+function moveTabIndicator(tab) {
+  const idx = TAB_ORDER.indexOf(tab);
+  const indicator = $('.tab-indicator');
+  if (indicator && idx >= 0) indicator.style.transform = `translateX(${idx * 100}%)`;
+}
+
+async function playViewExit(v, dir) {
+  const kids = [...v.children];
+  if (!kids.length) return;
+  for (const k of kids) {
+    k.classList.remove('view-enter', 'from-left', 'from-right');
+    k.classList.add('view-exit');
+    if (dir > 0) k.classList.add('to-left');
+    else if (dir < 0) k.classList.add('to-right');
+  }
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  await new Promise((r) => setTimeout(r, reduce ? 0 : 140));
+}
+
 async function switchTab(tab) {
+  const from = state.tab;
+  const dir = TAB_ORDER.indexOf(tab) - TAB_ORDER.indexOf(from);
   state.tab = tab;
   $$('.tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === tab));
+  moveTabIndicator(tab);
   const v = $('#view');
+
+  await playViewExit(v, dir);
   v.scrollTop = 0;
+  state.viewDir = dir > 0 ? 'right' : dir < 0 ? 'left' : '';
+
   try {
     if (tab === 'recommend') {
+      state.animateView = false;
       if (!state.results) {
         state.loadingResults = true;
         renderRecommend();
         await loadRecommend();
         state.loadingResults = false;
       }
+      state.animateView = true;
       renderRecommend();
     } else if (tab === 'dishes') {
-      if (!state.dishes.length) { state.loading.dishes = true; renderDishes(); }
+      state.animateView = false;
+      if (!state.dishes.length) {
+        state.loading.dishes = true;
+        renderDishes();
+      }
       await loadDishes();
       state.loading.dishes = false;
+      state.animateView = true;
       renderDishes();
     } else if (tab === 'records') {
-      if (!state.meals.length) { state.loading.meals = true; renderRecords(); }
+      state.animateView = false;
+      if (!state.meals.length) {
+        state.loading.meals = true;
+        renderRecords();
+      }
       await loadMeals();
       state.loading.meals = false;
+      state.animateView = true;
       renderRecords();
     } else if (tab === 'stats') {
+      state.animateView = false;
       renderStats();
       await loadStats();
+      state.animateView = true;
       renderStats();
     }
   } catch (e) {
     toast(e.message);
   }
+  state.animateView = false;
+  state.viewDir = '';
 }
 
 /* ============================================================
@@ -935,6 +1141,18 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
   if (tab) {
     vibrate(8);
     switchTab(tab.dataset.tab);
+  }
+});
+
+// 顶栏设置入口
+$('#appbar-actions').addEventListener('click', (e) => {
+  if (e.target.closest('[data-action="open-settings"]')) openSettingsSheet();
+});
+
+// 进场动画结束后移除标记类，避免后续交互（如摇一摇）重放整页动画
+document.addEventListener('animationend', (e) => {
+  if (['view-in', 'view-in-left', 'view-in-right'].includes(e.animationName)) {
+    e.target.classList.remove('view-enter', 'from-left', 'from-right');
   }
 });
 
@@ -966,22 +1184,26 @@ $('#view').addEventListener('click', async (e) => {
       vibrate(6);
     } else if (action === 'set-filter') {
       state.filters[key] = value;
-      state.loadingResults = true;
-      withScrollPreserved(() => renderRecommend());
-      await loadRecommend();
-      state.loadingResults = false;
-      withScrollPreserved(() => renderRecommend());
+      syncFilterChips();
       vibrate(8);
+      await reloadResults();
     } else if (action === 'shuffle') {
       await doShuffle();
     } else if (action === 'eat') {
       const mealType = state.filters.meal === 'any' ? state.meta.suggestedMeal : state.filters.meal;
-      await api('/api/meals', { method: 'POST', body: { dish_id: Number(id), meal_type: mealType } });
+      await api('/api/meals', {
+        method: 'POST',
+        body: { dish_id: Number(id), meal_type: mealType }
+      });
       state.recordedIds.add(Number(id));
       state.openDays = null;
       vibrate(45);
       toast('已记录，开饭啦 🍴');
-      $('#results').innerHTML = renderResults();
+      $$(`#results [data-action="eat"][data-id="${id}"]`).forEach((btn) => {
+        btn.disabled = true;
+        if (btn.classList.contains('icon-btn')) btn.textContent = '✅';
+        else btn.textContent = '✓ 已记录';
+      });
     } else if (action === 'cuisine') {
       state.dishCuisine = value;
       renderDishes();
@@ -1053,8 +1275,36 @@ $('#view').addEventListener('keydown', async (e) => {
   }
 });
 
-// 弹层内的多选
-$('#sheet-body').addEventListener('click', (e) => {
+// 弹层内的多选 / 设置
+$('#sheet-body').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-action="save-settings"]')) {
+    const value = $('#s-api-base').value.trim().replace(/\/+$/, '');
+    API_BASE = value;
+    if (value) localStorage.setItem('apiBase', value);
+    else localStorage.removeItem('apiBase');
+    closeSheet();
+    toast('已保存服务器地址');
+    try {
+      await loadMeta();
+    } catch {
+      toast('无法连接服务器');
+    }
+    refreshCurrent().catch(() => {});
+    return;
+  }
+  if (e.target.closest('[data-action="reset-settings"]')) {
+    localStorage.removeItem('apiBase');
+    API_BASE = (CONFIG_BASE || '').replace(/\/+$/, '');
+    closeSheet();
+    toast('已重置为默认地址');
+    try {
+      await loadMeta();
+    } catch {
+      toast('无法连接服务器');
+    }
+    refreshCurrent().catch(() => {});
+    return;
+  }
   const btn = e.target.closest('[data-toggle]');
   if (!btn) return;
   if (btn.dataset.toggle === 'spice') {
@@ -1065,19 +1315,33 @@ $('#sheet-body').addEventListener('click', (e) => {
   vibrate(6);
 });
 $('#sheet-close').addEventListener('click', closeSheet);
-$('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(); });
+$('#sheet').addEventListener('click', (e) => {
+  if (e.target.id === 'sheet') closeSheet();
+});
 
 // 弹层下拉关闭
 (function sheetDrag() {
   const grab = $('#sheet-grab');
   const panel = $('#sheet-panel');
-  let startY = null, dy = 0;
-  grab.addEventListener('touchstart', (e) => { startY = e.touches[0].clientY; panel.style.transition = 'none'; }, { passive: true });
-  grab.addEventListener('touchmove', (e) => {
-    if (startY === null) return;
-    dy = Math.max(0, e.touches[0].clientY - startY);
-    panel.style.transform = `translateY(${dy}px)`;
-  }, { passive: true });
+  let startY = null,
+    dy = 0;
+  grab.addEventListener(
+    'touchstart',
+    (e) => {
+      startY = e.touches[0].clientY;
+      panel.style.transition = 'none';
+    },
+    { passive: true }
+  );
+  grab.addEventListener(
+    'touchmove',
+    (e) => {
+      if (startY === null) return;
+      dy = Math.max(0, e.touches[0].clientY - startY);
+      panel.style.transform = `translateY(${dy}px)`;
+    },
+    { passive: true }
+  );
   grab.addEventListener('touchend', () => {
     panel.style.transition = '';
     if (dy > 90) {
@@ -1090,9 +1354,13 @@ $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') clos
 })();
 
 // appbar 阴影
-$('#view').addEventListener('scroll', () => {
-  $('.appbar').classList.toggle('scrolled', $('#view').scrollTop > 4);
-}, { passive: true });
+$('#view').addEventListener(
+  'scroll',
+  () => {
+    $('.appbar').classList.toggle('scrolled', $('#view').scrollTop > 4);
+  },
+  { passive: true }
+);
 
 /* ============================================================
    下拉刷新
@@ -1101,23 +1369,34 @@ $('#view').addEventListener('scroll', () => {
   const view = $('#view');
   const ptr = $('#ptr');
   const text = $('#ptr-text');
-  let startY = null, dist = 0;
+  let startY = null,
+    dist = 0;
 
-  view.addEventListener('touchstart', (e) => {
-    if (view.scrollTop <= 0) { startY = e.touches[0].clientY; dist = 0; }
-    else startY = null;
-  }, { passive: true });
+  view.addEventListener(
+    'touchstart',
+    (e) => {
+      if (view.scrollTop <= 0) {
+        startY = e.touches[0].clientY;
+        dist = 0;
+      } else startY = null;
+    },
+    { passive: true }
+  );
 
-  view.addEventListener('touchmove', (e) => {
-    if (startY === null) return;
-    const d = e.touches[0].clientY - startY;
-    if (d <= 0) return;
-    dist = Math.min(d * 0.45, 72);
-    if (dist > 8) {
-      ptr.classList.add('on');
-      text.textContent = dist > 52 ? '松手刷新' : '下拉刷新';
-    }
-  }, { passive: true });
+  view.addEventListener(
+    'touchmove',
+    (e) => {
+      if (startY === null) return;
+      const d = e.touches[0].clientY - startY;
+      if (d <= 0) return;
+      dist = Math.min(d * 0.45, 72);
+      if (dist > 8) {
+        ptr.classList.add('on');
+        text.textContent = dist > 52 ? '松手刷新' : '下拉刷新';
+      }
+    },
+    { passive: true }
+  );
 
   view.addEventListener('touchend', async () => {
     if (startY === null) return;
@@ -1127,7 +1406,11 @@ $('#view').addEventListener('scroll', () => {
     if (trigger) {
       text.textContent = '刷新中…';
       vibrate(15);
-      try { await refreshCurrent(); } catch { /* ignore */ }
+      try {
+        await refreshCurrent();
+      } catch {
+        /* ignore */
+      }
     }
     ptr.classList.remove('on');
   });
@@ -1140,34 +1423,45 @@ $('#view').addEventListener('scroll', () => {
   const view = $('#view');
   let sw = null;
 
-  view.addEventListener('touchstart', (e) => {
-    const content = e.target.closest('.swipe-content');
-    if (!content || e.target.closest('button')) { sw = null; return; }
-    const el = content.parentElement;
-    sw = {
-      content,
-      el,
-      startX: e.touches[0].clientX,
-      startY: e.touches[0].clientY,
-      dx: 0,
-      axis: null,
-      open: el.classList.contains('open')
-    };
-  }, { passive: true });
+  view.addEventListener(
+    'touchstart',
+    (e) => {
+      const content = e.target.closest('.swipe-content');
+      if (!content || e.target.closest('button')) {
+        sw = null;
+        return;
+      }
+      const el = content.parentElement;
+      sw = {
+        content,
+        el,
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        dx: 0,
+        axis: null,
+        open: el.classList.contains('open')
+      };
+    },
+    { passive: true }
+  );
 
-  view.addEventListener('touchmove', (e) => {
-    if (!sw) return;
-    const dx = e.touches[0].clientX - sw.startX;
-    const dy = e.touches[0].clientY - sw.startY;
-    if (!sw.axis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
-      sw.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-    }
-    if (sw.axis !== 'x') return;
-    const base = sw.open ? -84 : 0;
-    sw.dx = Math.max(-104, Math.min(0, base + dx));
-    sw.content.classList.add('dragging');
-    sw.content.style.transform = `translateX(${sw.dx}px)`;
-  }, { passive: true });
+  view.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!sw) return;
+      const dx = e.touches[0].clientX - sw.startX;
+      const dy = e.touches[0].clientY - sw.startY;
+      if (!sw.axis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+        sw.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      }
+      if (sw.axis !== 'x') return;
+      const base = sw.open ? -84 : 0;
+      sw.dx = Math.max(-104, Math.min(0, base + dx));
+      sw.content.classList.add('dragging');
+      sw.content.style.transform = `translateX(${sw.dx}px)`;
+    },
+    { passive: true }
+  );
 
   view.addEventListener('touchend', () => {
     if (!sw) return;
@@ -1175,7 +1469,9 @@ $('#view').addEventListener('scroll', () => {
     content.classList.remove('dragging');
     content.style.transform = '';
     if (dx < -42) {
-      $$('.swipe.open').forEach((o) => { if (o !== el) o.classList.remove('open'); });
+      $$('.swipe.open').forEach((o) => {
+        if (o !== el) o.classList.remove('open');
+      });
       el.classList.add('open');
     } else if (sw.open) {
       el.classList.remove('open');
@@ -1187,39 +1483,109 @@ $('#view').addEventListener('scroll', () => {
 /* ============================================================
    摇一摇
    ============================================================ */
+const SHAKE_DELTA_THRESHOLD = 18;
+const SHAKE_COOLDOWN_MS = 1300;
 let lastShake = 0;
+let lastAcceleration = null;
+let motionListening = false;
+
+function setShakeStatus(message) {
+  const status = $('#shake-status');
+  if (status) status.textContent = message;
+  else toast(message);
+}
+
 function onMotion(e) {
-  const a = e.accelerationIncludingGravity;
-  if (!a) return;
-  const power = Math.abs(a.x || 0) + Math.abs(a.y || 0) + Math.abs(a.z || 0);
+  if (document.hidden || state.tab !== 'recommend') return;
+  const acceleration = e.acceleration || e.accelerationIncludingGravity;
+  if (!acceleration) return;
+
+  const current = {
+    x: acceleration.x || 0,
+    y: acceleration.y || 0,
+    z: acceleration.z || 0
+  };
+  if (!lastAcceleration) {
+    lastAcceleration = current;
+    return;
+  }
+
+  const delta =
+    Math.abs(current.x - lastAcceleration.x) +
+    Math.abs(current.y - lastAcceleration.y) +
+    Math.abs(current.z - lastAcceleration.z);
+  lastAcceleration = current;
   const now = Date.now();
-  if (power > 34 && now - lastShake > 1300) {
+  if (delta >= SHAKE_DELTA_THRESHOLD && now - lastShake > SHAKE_COOLDOWN_MS) {
     lastShake = now;
-    if (state.tab === 'recommend') doShuffle();
+    void doShuffle();
   }
 }
+
+function startMotionListener() {
+  if (motionListening) return;
+  motionListening = true;
+  lastAcceleration = null;
+  window.addEventListener('devicemotion', onMotion, { passive: true });
+  setShakeStatus('摇一摇换一批已开启');
+}
+
 function enableShake() {
-  if (typeof DeviceMotionEvent === 'undefined') return;
+  if (motionListening) return;
+  if (typeof DeviceMotionEvent === 'undefined') {
+    setShakeStatus('当前浏览器不支持运动传感器');
+    return;
+  }
   if (typeof DeviceMotionEvent.requestPermission === 'function') {
     DeviceMotionEvent.requestPermission()
-      .then((p) => { if (p === 'granted') window.addEventListener('devicemotion', onMotion); })
-      .catch(() => {});
+      .then((permission) => {
+        if (permission === 'granted') {
+          startMotionListener();
+        } else {
+          setShakeStatus('请在浏览器设置中允许“运动与方向访问”');
+        }
+      })
+      .catch(() => {
+        setShakeStatus('无法获取运动权限；iPhone 通常需要通过 HTTPS 访问');
+      });
   } else {
-    window.addEventListener('devicemotion', onMotion);
+    startMotionListener();
   }
 }
-document.addEventListener('click', (e) => {
-  if (e.target.closest('#shuffle-btn')) enableShake();
-}, { capture: true });
+document.addEventListener(
+  'click',
+  (e) => {
+    if (e.target.closest('#shuffle-btn')) enableShake();
+  },
+  { capture: true }
+);
 
 /* ============================================================
    启动
    ============================================================ */
+async function loadMeta() {
+  state.meta = await api('/api/meta');
+}
+
+function setupNativeBack() {
+  const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (!App || typeof App.addListener !== 'function') return;
+  App.addListener('backButton', ({ canGoBack }) => {
+    if (state.tab !== 'recommend') switchTab('recommend');
+    else if (!canGoBack && App.exitApp) App.exitApp();
+  });
+}
+
 (async function init() {
+  if (isNative() && !API_BASE) {
+    toast('请先设置服务器地址');
+    openSettingsSheet();
+  }
   try {
-    state.meta = await api('/api/meta');
+    await loadMeta();
   } catch {
     toast('无法连接服务器');
   }
+  setupNativeBack();
   await switchTab('recommend');
 })();

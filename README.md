@@ -6,16 +6,16 @@
 
 ## ✨ 功能特性
 
-| 功能 | 说明 |
-| --- | --- |
+| 功能        | 说明                                                     |
+| ----------- | -------------------------------------------------------- |
 | 🎲 智能推荐 | 综合口味、预算、做饭时长、食材多维度打分，加权随机出结果 |
-| 📱 摇一摇 | 点大按钮或真的晃动手机换一批（移动端陀螺仪） |
-| 🧊 冰箱食材 | 输入手头有的食材，优先推荐能用上的菜 |
-| 🔁 避免重复 | 可设置 1/2/3/7 天内吃过的菜不再推荐 |
-| 📝 用餐记录 | 一键记录吃了什么，支持 1–5 星评分 |
-| 📊 月度统计 | 用餐次数、菜品丰富度、人均/总花费、最爱吃的菜、菜系分布 |
-| 📚 菜品库 | 55 道预置菜品，支持增删改、搜索、按菜系筛选 |
-| 🍜 视觉菜品 | 每道菜按菜系自动配色 + 匹配食物图标 |
+| 📱 摇一摇   | 点大按钮或真的晃动手机换一批（移动端陀螺仪）             |
+| 🧊 冰箱食材 | 输入手头有的食材，优先推荐能用上的菜                     |
+| 🔁 避免重复 | 可设置 1/2/3/7 天内吃过的菜不再推荐                      |
+| 📝 用餐记录 | 一键记录吃了什么，支持 1–5 星评分                        |
+| 📊 月度统计 | 用餐次数、菜品丰富度、人均/总花费、最爱吃的菜、菜系分布  |
+| 📚 菜品库   | 55 道预置菜品，支持增删改、搜索、按菜系筛选              |
+| 🍜 视觉菜品 | 每道菜按菜系自动配色 + 匹配食物图标                      |
 
 **内置 55 道菜**，覆盖川菜、湘菜、粤菜、日料、韩料、西餐、轻食、面食等 16 个菜系，早/午/晚三餐均有。
 
@@ -67,12 +67,89 @@ npm start
 npm run dev
 ```
 
+### 代码质量与测试
+
+```bash
+# 格式检查、静态检查和自动化测试
+npm run check
+
+# 仅运行测试
+npm test
+
+# 自动格式化代码
+npm run format
+```
+
+项目使用 Node.js 24（见 `.nvmrc`）。如需配置端口，先复制 `.env.example` 为 `.env` 后修改；也可以直接设置系统环境变量。
+
 ### 修改端口
 
 ```bash
 # Windows PowerShell
 $env:PORT=8080; npm start
 ```
+
+---
+
+## 📱 打包成手机 App（Capacitor）
+
+项目已接入 [Capacitor](https://capacitorjs.com/)，可以把 `public/` 打包成 iOS / Android 原生 App，同时继续使用本机的 Express + SQLite 作为服务端。
+
+> 想直接生成安卓 APK 装到手机，请见 **[BUILD_ANDROID.md](./BUILD_ANDROID.md)**（含环境安装、打包、签名、排错全流程）。
+
+### 架构说明
+
+App 里的网页资源是**本地打包**的，运行在 `capacitor://localhost`（iOS）或 `https://localhost`（Android）下，因此接口请求必须指向真正的服务端地址，而不是相对路径。项目通过 `public/config.js` 和 App 内「设置」来配置该地址。
+
+### 一、准备环境
+
+- **iOS**：macOS + Xcode（App Store 安装），首次打开 `ios/App/App.xcworkspace` 会自动解析 Swift Package 依赖。
+- **Android**：Android Studio（含 SDK）+ JDK 17+。
+
+### 二、配置服务器地址
+
+三选一（优先级从高到低）：
+
+1. **App 内设置**（推荐）：打开 App，点右上角 ⚙️，填入服务端地址，如 `http://192.168.1.10:3000`，保存即可。
+2. **改 `public/config.js`**：把 `apiBase` 改成你的服务端地址，然后 `npm run cap:sync`。
+3. 留空：浏览器直接访问时走同源，无需配置。
+
+> 手机与电脑需在同一 WiFi；或把服务端部署到公网后填公网地址。
+
+### 三、同步与运行
+
+```bash
+# 每次改动 public/ 下的前端代码后，同步到原生工程
+npm run cap:sync
+
+# 打开原生 IDE 后点运行
+npm run cap:ios       # 需要 Xcode
+npm run cap:android   # 需要 Android Studio
+
+# 或直接用命令行跑到设备/模拟器
+npx cap run ios
+npx cap run android
+```
+
+**重要**：App 只负责界面，服务端要单独跑起来（`npm start`），并保证手机能访问到它。
+
+### 四、已经处理好的原生配置
+
+- **CORS**：`server.ts` 已放行跨域请求（`Access-Control-Allow-Origin`），App 才能调用接口。
+- **明文 HTTP**：Android 已开启 `usesCleartextTraffic`；iOS 已在 `Info.plist` 配置 ATS 例外，允许访问局域网 HTTP 地址。
+- **返回键**：Android 物理返回键会先回到「推荐」页，再按才退出 App。
+- **摇一摇**：使用网页 `devicemotion`。Android 可用；iOS 需在首次点击骰子时授权「运动与方向访问」。
+
+### 五、常见问题
+
+**Q：App 打开后一直提示「无法连接服务器」？**
+A：检查 ⚙️ 里的服务器地址是否正确、服务端是否已启动、手机与电脑是否同一网络、电脑防火墙是否放行端口。
+
+**Q：改了 `public/` 里的代码，App 没变化？**
+A：需要重新执行 `npm run cap:sync`，再在原生 IDE 里重新运行。
+
+**Q：iOS 摇一摇没反应？**
+A：先点一次骰子按钮触发权限请求并允许；若仍失败，确认服务器地址是 HTTPS 或已按上文配置 ATS。
 
 ---
 
@@ -134,14 +211,14 @@ $env:PORT=8080; npm start
 
 推荐分数由 `src/recommend.js` 计算，各维度加权后做**加权随机抽样**（所以每次结果不同，但更符合条件的分更高）：
 
-| 维度 | 加分规则 |
-| --- | --- |
-| 心情/口味 | 每命中一个口味标签 +5；辣度不匹配 -4 |
-| 预算 | 超出预算 -10；在预算内按剩余空间加分 |
-| 耗时 | 超出上限 -10；越快加分越多 |
-| 食材 | 每命中一样手头食材 +3；食材全齐 +2 |
-| 历史评分 | 按 `(均分 - 3) × 1.5` 加权，4 分以上显示理由 |
-| 新鲜度 | 没吃过的 +2；最近吃过的 -6 |
+| 维度      | 加分规则                                     |
+| --------- | -------------------------------------------- |
+| 心情/口味 | 每命中一个口味标签 +5；辣度不匹配 -4         |
+| 预算      | 超出预算 -10；在预算内按剩余空间加分         |
+| 耗时      | 超出上限 -10；越快加分越多                   |
+| 食材      | 每命中一样手头食材 +3；食材全齐 +2           |
+| 历史评分  | 按 `(均分 - 3) × 1.5` 加权，4 分以上显示理由 |
+| 新鲜度    | 没吃过的 +2；最近吃过的 -6                   |
 
 筛选流程逐级放宽，保证一定有结果：
 
@@ -164,32 +241,32 @@ $env:PORT=8080; npm start
 
 ## 🔌 API 接口
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/meta` | 心情选项、餐段选项、当前建议餐段 |
-| GET | `/api/dishes` | 全部菜品 |
-| GET | `/api/dishes/:id` | 单个菜品 |
-| POST | `/api/dishes` | 新增菜品 |
-| PUT | `/api/dishes/:id` | 修改菜品 |
-| DELETE | `/api/dishes/:id` | 删除菜品（连带记录） |
-| GET | `/api/recommend` | 获取推荐 |
-| GET | `/api/meals` | 用餐记录（`?limit=` 默认 100） |
-| POST | `/api/meals` | 记录一餐 |
-| PATCH | `/api/meals/:id` | 修改评分 |
-| DELETE | `/api/meals/:id` | 删除记录 |
-| GET | `/api/stats` | 月度统计（`?month=YYYY-MM`） |
+| 方法   | 路径              | 说明                             |
+| ------ | ----------------- | -------------------------------- |
+| GET    | `/api/meta`       | 心情选项、餐段选项、当前建议餐段 |
+| GET    | `/api/dishes`     | 全部菜品                         |
+| GET    | `/api/dishes/:id` | 单个菜品                         |
+| POST   | `/api/dishes`     | 新增菜品                         |
+| PUT    | `/api/dishes/:id` | 修改菜品                         |
+| DELETE | `/api/dishes/:id` | 删除菜品（连带记录）             |
+| GET    | `/api/recommend`  | 获取推荐                         |
+| GET    | `/api/meals`      | 用餐记录（`?limit=` 默认 100）   |
+| POST   | `/api/meals`      | 记录一餐                         |
+| PATCH  | `/api/meals/:id`  | 修改评分                         |
+| DELETE | `/api/meals/:id`  | 删除记录                         |
+| GET    | `/api/stats`      | 月度统计（`?month=YYYY-MM`）     |
 
 ### `/api/recommend` 查询参数
 
-| 参数 | 类型 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `meal` | string | 按当前时间 | `breakfast` / `lunch` / `dinner` / `any` |
-| `mood` | string | `any` | `any` / `light` / `spicy` / `heavy` / `meat` / `veg` / `soup` / `lite` |
-| `maxPrice` | number | 不限 | 人均预算上限（元） |
-| `maxCook` | number | 不限 | 最长做饭时间（分钟） |
-| `ingredients` | string | 空 | 手头食材，逗号分隔 |
-| `avoidDays` | number | `2` | 多少天内吃过的排除，`0` 表示不排除 |
-| `count` | number | `3` | 返回条数（最多 10） |
+| 参数          | 类型   | 默认       | 说明                                                                   |
+| ------------- | ------ | ---------- | ---------------------------------------------------------------------- |
+| `meal`        | string | 按当前时间 | `breakfast` / `lunch` / `dinner` / `any`                               |
+| `mood`        | string | `any`      | `any` / `light` / `spicy` / `heavy` / `meat` / `veg` / `soup` / `lite` |
+| `maxPrice`    | number | 不限       | 人均预算上限（元）                                                     |
+| `maxCook`     | number | 不限       | 最长做饭时间（分钟）                                                   |
+| `ingredients` | string | 空         | 手头食材，逗号分隔                                                     |
+| `avoidDays`   | number | `2`        | 多少天内吃过的排除，`0` 表示不排除                                     |
+| `count`       | number | `3`        | 返回条数（最多 10）                                                    |
 
 示例：
 
@@ -203,19 +280,31 @@ curl "http://localhost:3000/api/recommend?meal=lunch&mood=spicy&maxPrice=35&maxC
 
 ```
 what-to-eat/
-├── server.js            # Express 服务与全部路由
+├── server.ts            # TypeScript 应用入口与 HTTP 中间件
 ├── package.json
+├── tsconfig.json
 ├── src/
 │   ├── db.js            # SQLite 建表、CRUD、统计、种子数据灌入
 │   ├── seed.js          # 55 道预置菜品数据
 │   └── recommend.js     # 推荐算法（打分 + 加权随机）
+│   ├── api/             # API 错误模型与 Zod 请求契约
+│   ├── controllers/     # 请求/响应映射
+│   ├── services/        # 业务用例
+│   ├── repositories/    # 数据访问边界
+│   └── routes/          # 路由注册
 ├── public/
 │   ├── index.html       # 页面骨架、标签栏、底部弹层
 │   ├── styles.css       # 设计系统（磁贴、折叠面板、骨架屏、环形图…）
-│   └── app.js           # 前端逻辑（渲染、折叠、手势、下拉刷新、摇一摇）
+│   ├── app.js           # 前端逻辑（渲染、折叠、手势、下拉刷新、摇一摇）
+│   └── config.js        # 运行时配置（App 的服务端地址）
+├── capacitor.config.json # Capacitor 配置（App 名称、包名、webDir）
+├── android/             # Android 原生工程（Capacitor 生成）
+├── ios/                 # iOS 原生工程（Capacitor 生成）
 └── data/                # 运行时生成，已 gitignore
     └── app.db
 ```
+
+后端接口对 ID、餐段、评分、价格、耗时、分页与推荐参数进行运行时校验；错误响应包含稳定的 `code` 与 `requestId`，方便定位问题。数据库结构通过 `src/migrations.js` 进行版本化演进。
 
 ---
 
@@ -228,7 +317,7 @@ A：确认手机和电脑在同一 WiFi；检查电脑防火墙是否拦截了 N
 A：算法是加权随机抽样，更符合条件的菜被抽中的概率更高，但不会每次都一模一样——这样才不会每天吃同一道菜。
 
 **Q：摇一摇没反应？**
-A：iPhone 需要在点击按钮时授权"运动与方向访问"，点一下大按钮会触发授权弹窗。桌面浏览器不支持摇一摇，点按钮即可。
+A：先点一次中间的骰子按钮：它会换一批，并在 iPhone 上请求“运动与方向访问”权限；授权后再摇动手机即可。若状态显示权限请求失败，iPhone 通常需要通过 HTTPS 访问页面。桌面浏览器不支持摇一摇，点按钮即可。
 
 **Q：能多设备同步吗？**
 A：目前数据存在本机 SQLite 文件里，局域网内多设备访问的是同一份数据。若要跨网络使用，需自行部署到服务器。

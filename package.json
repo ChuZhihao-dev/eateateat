@@ -3,15 +3,42 @@
   "version": "1.0.0",
   "description": "今天吃什么 - 移动优先的智能选餐助手",
   "type": "module",
-  "main": "server.js",
+  "main": "server.ts",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "tsx server.ts",
+    "dev": "tsx watch server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "cap:sync": "cap sync",
+    "cap:ios": "cap sync ios && cap open ios",
+    "cap:android": "cap sync android && cap open android"
   },
   "engines": {
     "node": ">=22.5.0"
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "@types/express": "^5.0.6",
+    "@types/supertest": "^6.0.3",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.7",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }

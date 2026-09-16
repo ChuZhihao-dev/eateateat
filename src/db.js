@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { SEED_DISHES } from './seed.js';
+import { runMigrations } from './migrations.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '..', 'data');
@@ -13,34 +14,16 @@ const db = new DatabaseSync(join(dataDir, 'app.db'));
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
-
-  CREATE TABLE IF NOT EXISTS dishes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL,
-    cuisine     TEXT NOT NULL DEFAULT '家常',
-    meals       TEXT NOT NULL DEFAULT '["lunch","dinner"]',
-    tags        TEXT NOT NULL DEFAULT '[]',
-    spice       INTEGER NOT NULL DEFAULT 0,
-    cook        INTEGER NOT NULL DEFAULT 20,
-    price       INTEGER NOT NULL DEFAULT 20,
-    ingredients TEXT NOT NULL DEFAULT '[]',
-    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS meals (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    dish_id   INTEGER NOT NULL,
-    meal_type TEXT NOT NULL DEFAULT 'lunch',
-    rating    INTEGER,
-    eaten_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-    FOREIGN KEY (dish_id) REFERENCES dishes(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_meals_eaten_at ON meals(eaten_at);
-  CREATE INDEX IF NOT EXISTS idx_meals_dish_id ON meals(dish_id);
 `);
 
+runMigrations(db);
+
 const ALL_MEALS = ['breakfast', 'lunch', 'dinner'];
+
+export function checkDatabaseHealth() {
+  db.prepare('SELECT 1 AS ok').get();
+  return true;
+}
 
 function parseArr(value) {
   try {
@@ -68,10 +51,7 @@ function normalizeMeals(meals) {
 // ---------- 菜品 CRUD ----------
 
 export function listDishes() {
-  return db
-    .prepare('SELECT * FROM dishes ORDER BY cuisine, name')
-    .all()
-    .map(rowToDish);
+  return db.prepare('SELECT * FROM dishes ORDER BY cuisine, name').all().map(rowToDish);
 }
 
 export function getDish(id) {
@@ -184,7 +164,9 @@ export function recentDishIds(days = 3) {
 // ---------- 统计 ----------
 
 export function monthlyStats(month) {
-  const ym = month || new Date().toISOString().slice(0, 7); // YYYY-MM
+  const now = new Date();
+  const localMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const ym = month || localMonth; // YYYY-MM，和 SQLite 的 localtime 记录保持一致
   const summary = db
     .prepare(
       `SELECT COUNT(*) AS total_meals,

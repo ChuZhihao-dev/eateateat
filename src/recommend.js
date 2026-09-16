@@ -38,7 +38,10 @@ function ratingByDish() {
   return avg;
 }
 
-function scoreDish(dish, { mood, maxPrice, maxCook, ingredients, ratings, eatenIds, recentlyEatenIds }) {
+function scoreDish(
+  dish,
+  { mood, maxPrice, maxCook, ingredients, ratings, eatenIds, recentlyEatenIds }
+) {
   const reasons = [];
   let score = 1;
 
@@ -79,7 +82,9 @@ function scoreDish(dish, { mood, maxPrice, maxCook, ingredients, ratings, eatenI
   // 3) 冰箱/手头食材匹配
   if (ingredients && ingredients.length) {
     const owned = ingredients.map((s) => s.trim()).filter(Boolean);
-    const hits = dish.ingredients.filter((ing) => owned.some((o) => ing.includes(o) || o.includes(ing)));
+    const hits = dish.ingredients.filter((ing) =>
+      owned.some((o) => ing.includes(o) || o.includes(ing))
+    );
     if (hits.length) {
       score += 3 * hits.length;
       reasons.push(`用得上：${hits.join('、')}`);
@@ -155,12 +160,21 @@ export function recommend(opts = {}) {
   const eatenIds = new Set(listMeals({ limit: 1000 }).map((m) => m.dish_id));
   const recentlyEatenIds = new Set(avoidDays > 0 ? recentDishIds(avoidDays) : []);
 
-  const ctx = { mood: moodPreset, maxPrice, maxCook, ingredients, ratings, eatenIds, recentlyEatenIds };
+  const ctx = {
+    mood: moodPreset,
+    maxPrice,
+    maxCook,
+    ingredients,
+    ratings,
+    eatenIds,
+    recentlyEatenIds
+  };
 
   // 逐级放宽条件，保证一定有结果
   const attempts = [
     // 严格：时段 + 硬性条件 + 排除最近
-    (d) => matchesMeal(d, meal) && withinHardLimits(d, maxPrice, maxCook) && !recentlyEatenIds.has(d.id),
+    (d) =>
+      matchesMeal(d, meal) && withinHardLimits(d, maxPrice, maxCook) && !recentlyEatenIds.has(d.id),
     // 放宽：允许最近吃过的
     (d) => matchesMeal(d, meal) && withinHardLimits(d, maxPrice, maxCook),
     // 再放宽：忽略预算/耗时
