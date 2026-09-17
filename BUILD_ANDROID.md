@@ -17,8 +17,10 @@ npm run cap:sync               （把 public/ 前端同步进 android/ 原生工
         ↓
 adb install / 传文件到手机安装
         ↓
-App 内点 ⚙️ 填服务器地址 → 连上服务端
+打开 App 直接使用（本机模式，数据存设备本地）
 ```
+
+> 默认无需服务器。只有想启用联网模式时，才需要在 App 内点 ⚙️ 填服务器地址。
 
 工程关键信息（一般不用改）：
 
@@ -34,7 +36,7 @@ App 内点 ⚙️ 填服务器地址 → 连上服务端
 | 需要的 JDK             | **21**（不要用 JDK 26，Gradle 不支持） |
 | Capacitor 配置         | `capacitor.config.json`                |
 
-> 重要概念：App 里的网页资源是**本地打包**进 APK 的，不联网也能打开界面；但**数据来自服务端**，所以电脑上的 `npm start` 必须一直跑着，手机通过局域网访问它。
+> 重要概念：App 里的网页资源是**本地打包**进 APK 的，数据默认也存在设备本地（`localStorage`），因此**离线可用、不需要服务器**。只有启用可选的联网模式时，才需要电脑上的 `npm start` 一直跑着。
 
 ---
 
@@ -139,15 +141,17 @@ sdk.dir=/opt/homebrew/share/android-commandlinetools
 npm run cap:sync
 ```
 
-它会把 `public/`（`index.html` / `styles.css` / `app.js` / `config.js`）复制进 `android/app/src/main/assets/public`，并更新插件。
+它会把 `public/`（`index.html` / `styles.css` / `app.js` / `local-api.js` / `seed-data.js` / `config.js`）复制进 `android/app/src/main/assets/public`，并更新插件。
 
-### 2.3 确定服务器地址（先想好）
+### 2.3 服务器地址（可选，本机模式可跳过）
 
-App 需要知道服务端在哪。三种方式（优先级从高到低）：
+默认走**本机模式**，数据存在手机上，无需任何服务器，可直接跳到第 3 节打包。
+
+只有想启用联网模式时才需要配置服务端地址，三种方式（优先级从高到低）：
 
 1. **App 内设置**：打开 App 点右上角 ⚙️ 填地址（推荐，不用重新打包）。
 2. **改 `public/config.js`**：把 `apiBase` 改成你的地址，再 `npm run cap:sync`。
-3. 留空 → 走同源（仅浏览器直接访问服务端时可用，手机 App 里不可用）。
+3. 留空 → 本机模式（默认）。
 
 局域网地址形如 `http://192.168.1.10:3000`。查电脑 IP：
 
@@ -199,7 +203,11 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 ---
 
-## 5. 首次运行配置
+## 5. 首次运行
+
+直接打开 App 即可使用——**本机模式不需要任何服务器**，数据自动保存在手机上。
+
+如需启用**联网模式**（多设备共享同一份数据）：
 
 1. 电脑上启动服务端（保持运行）：
 
@@ -209,7 +217,7 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 2. 确认手机和电脑连的是**同一个 WiFi**。
 3. 打开 App，点右上角 **⚙️**，填入 `http://<电脑IP>:3000`，保存。
-4. 如果提示「无法连接服务器」，见第 8 节排查。
+4. 如果提示「无法连接服务器」，见第 8 节排查。清空地址即可回到本机模式。
 
 ---
 
@@ -302,20 +310,20 @@ cd android
 
 ## 8. 常见问题排查
 
-| 报错 / 现象                                           | 原因与解决                                                                                                             |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `Unable to locate a Java Runtime`                     | 没装 JDK。执行 `brew install --cask temurin@21`                                                                        |
-| `Unsupported class file major version 70` 之类        | JDK 版本太新。确认 `java -version` 是 21，必要时 `export JAVA_HOME=$(/usr/libexec/java_home -v 21)`                    |
-| `sdkmanager: command not found`                       | PATH 没生效。重新 `source ~/.zshrc` 或开新终端                                                                         |
-| `SDK location not found`                              | 缺 `android/local.properties`，见 2.1                                                                                  |
-| `Failed to find target with hash string 'android-36'` | SDK 组件没装，执行 1.5                                                                                                 |
-| `You have not accepted the license agreements`        | 执行 `sdkmanager --licenses`                                                                                           |
-| 首次打包卡在下载                                      | 在下载 Gradle/依赖，确保网络通畅；公司网络可配代理                                                                     |
-| App 显示「无法连接服务器」                            | ①`npm start` 是否在跑；②⚙️ 地址是否正确；③手机电脑是否同 WiFi；④电脑防火墙是否拦截 Node（macOS 首次会弹窗，需允许）    |
-| `npm start` 报 `EADDRINUSE`                           | 3000 端口被占用。`lsof -nP -iTCP:3000 -sTCP:LISTEN` 找到进程杀掉，或 `PORT=3001 npm start`（App 地址也要改成对应端口） |
-| 改了前端 App 没变化                                   | 忘了 `npm run cap:sync`，同步后重新打包                                                                                |
-| 摇一摇没反应                                          | Android 一般可用；需先点一次骰子触发运动权限。桌面浏览器不支持                                                         |
-| 安装时提示「应用未安装」                              | 卸载旧版本再装，或确认包名未冲突                                                                                       |
+| 报错 / 现象                                           | 原因与解决                                                                                                                                |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `Unable to locate a Java Runtime`                     | 没装 JDK。执行 `brew install --cask temurin@21`                                                                                           |
+| `Unsupported class file major version 70` 之类        | JDK 版本太新。确认 `java -version` 是 21，必要时 `export JAVA_HOME=$(/usr/libexec/java_home -v 21)`                                       |
+| `sdkmanager: command not found`                       | PATH 没生效。重新 `source ~/.zshrc` 或开新终端                                                                                            |
+| `SDK location not found`                              | 缺 `android/local.properties`，见 2.1                                                                                                     |
+| `Failed to find target with hash string 'android-36'` | SDK 组件没装，执行 1.5                                                                                                                    |
+| `You have not accepted the license agreements`        | 执行 `sdkmanager --licenses`                                                                                                              |
+| 首次打包卡在下载                                      | 在下载 Gradle/依赖，确保网络通畅；公司网络可配代理                                                                                        |
+| App 显示「无法连接服务器」（仅联网模式）              | ①`npm start` 是否在跑；②⚙️ 地址是否正确；③手机电脑是否同 WiFi；④电脑防火墙是否拦截 Node（macOS 首次会弹窗，需允许）。清空地址即回本机模式 |
+| `npm start` 报 `EADDRINUSE`                           | 3000 端口被占用。`lsof -nP -iTCP:3000 -sTCP:LISTEN` 找到进程杀掉，或 `PORT=3001 npm start`（App 地址也要改成对应端口）                    |
+| 改了前端 App 没变化                                   | 忘了 `npm run cap:sync`，同步后重新打包                                                                                                   |
+| 摇一摇没反应                                          | Android 一般可用；需先点一次骰子触发运动权限。桌面浏览器不支持                                                                            |
+| 安装时提示「应用未安装」                              | 卸载旧版本再装，或确认包名未冲突                                                                                                          |
 
 ---
 
@@ -369,18 +377,20 @@ cd android && ./gradlew assembleDebug
 # 安装
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
-# 跑服务端
+# 跑服务端（可选，仅联网模式需要）
 cd /Users/Admin/Desktop/eateat/eateateat && npm start
 ipconfig getifaddr en0
 ```
 
 ## 附录 B：产物与生成目录说明
 
-| 路径                                                       | 说明                                    |
-| ---------------------------------------------------------- | --------------------------------------- |
-| `android/app/build/outputs/apk/debug/app-debug.apk`        | Debug 安装包                            |
-| `android/app/build/outputs/apk/release/app-release.apk`    | Release 安装包（签名后）                |
-| `android/app/build/outputs/bundle/release/app-release.aab` | 上架 Play 商店用                        |
-| `android/app/src/main/assets/public/`                      | `cap sync` 复制进去的前端资源（勿手改） |
-| `android/local.properties`                                 | SDK 路径（本机生成，gitignore）         |
-| `public/config.js`                                         | 服务器地址默认值                        |
+| 路径                                                       | 说明                                              |
+| ---------------------------------------------------------- | ------------------------------------------------- |
+| `android/app/build/outputs/apk/debug/app-debug.apk`        | Debug 安装包                                      |
+| `android/app/build/outputs/apk/release/app-release.apk`    | Release 安装包（签名后）                          |
+| `android/app/build/outputs/bundle/release/app-release.aab` | 上架 Play 商店用                                  |
+| `android/app/src/main/assets/public/`                      | `cap sync` 复制进去的前端资源（勿手改）           |
+| `android/local.properties`                                 | SDK 路径（本机生成，gitignore）                   |
+| `public/local-api.js`                                      | 本机数据层（localStorage + 推荐算法），无需服务器 |
+| `public/seed-data.js`                                      | 本机种子菜品数据                                  |
+| `public/config.js`                                         | 可选的服务器地址默认值（留空 = 本机模式）         |

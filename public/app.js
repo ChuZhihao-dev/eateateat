@@ -1,15 +1,10 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-// 手机 App 里网页资源是本地打包的，接口必须指向真正的服务端地址。
-// 优先级：App 内设置(localStorage) > config.js 默认值 > 同源相对路径。
+// 本机模式（默认）：数据存在设备本地 localStorage，无需服务器。
+// 联网模式：在设置里填写服务器地址，或改 config.js 的 apiBase。
 const CONFIG_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase) || '';
 let API_BASE = (localStorage.getItem('apiBase') || CONFIG_BASE || '').replace(/\/+$/, '');
-
-const isNative = () =>
-  typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform
-    ? window.Capacitor.isNativePlatform()
-    : false;
 
 const MEAL_LABELS = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', any: '不限' };
 const MEAL_ORDER = ['breakfast', 'lunch', 'dinner', 'any'];
@@ -70,6 +65,7 @@ const state = {
   openDays: null,
   stats: null,
   statsMonth: localMonth(),
+  pickerYear: null,
   acc: { filters: false, mealType: true, topDishes: true, cuisine: false },
   recordedIds: new Set(),
   animateView: false,
@@ -169,6 +165,8 @@ function escapeHtml(s) {
 }
 
 async function api(path, options = {}) {
+  // 未配置服务器地址时走本机数据层，无需联网、可离线使用。
+  if (!API_BASE) return window.LocalAPI.handle(path, options);
   const res = await fetch(API_BASE + path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
@@ -372,9 +370,9 @@ function renderRecommend() {
       <div id="results">${state.loadingResults ? skeletonResults() : renderResults()}</div>
       <div class="fab-clearance"></div>
     </div>
-    <button class="shuffle-fab${state.animateView ? ' view-enter' : ''}" id="shuffle-btn" data-action="shuffle" aria-label="换一批" title="换一批（摇一摇）">
-      <span class="shuffle-fab-ring"></span>
+    <button class="shuffle-fab${state.animateView ? ' view-enter' : ''}" id="shuffle-btn" data-action="shuffle" aria-label="换一批（摇一摇）" title="换一批（摇一摇）">
       <span class="shuffle-fab-emoji">🎲</span>
+      <span class="shuffle-fab-text"><b>换一批</b><small>摇一摇也行</small></span>
     </button>
   `;
 }
@@ -425,6 +423,32 @@ function resultMeta(dish) {
   </div>`;
 }
 
+function resultCard(r, i) {
+  const primary = i === 0;
+  return `
+    <div class="res-hero res-result${primary ? ' res-result--primary' : ''}" style="--d:${(i * 0.1).toFixed(1)}s">
+      <div class="between">
+        ${primary ? '<span class="badge gold">✨ 今日首选</span>' : '<span class="badge">🌟 推荐</span>'}
+        <span class="badge">匹配度 ${r.matchScore}</span>
+      </div>
+      <div class="res-top">
+        ${dishTile(r.dish, primary ? 'lg' : 'md')}
+        <div class="grow">
+          <div class="res-name ellipsis">${escapeHtml(r.dish.name)}</div>
+          <div class="res-cuisine">${escapeHtml(r.dish.cuisine)} · ${r.dish.tags.map(escapeHtml).join(' / ') || '无标签'}</div>
+          ${resultMeta(r.dish)}
+        </div>
+      </div>
+      ${r.reasons.length ? `<div class="reasons">${r.reasons.map((reason) => `<div class="reason">${escapeHtml(reason)}</div>`).join('')}</div>` : ''}
+      <div class="actions-row">
+        <button class="btn btn-primary btn-block" data-action="eat" data-id="${r.dish.id}" ${state.recordedIds.has(r.dish.id) ? 'disabled' : ''}>
+          ${state.recordedIds.has(r.dish.id) ? '✓ 已记录' : '🍴 就吃它'}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function renderResults() {
   if (!state.results) return '';
   const { results, context } = state.results;
@@ -435,49 +459,11 @@ function renderResults() {
   const hint = context.relaxed
     ? `<div class="sub" style="padding:0 2px 2px">条件有点严，已为你放宽范围</div>`
     : '';
-  const [first, ...rest] = results;
 
   return `
     <div class="stack">
       ${hint}
-      <div class="res-hero">
-        <div class="between">
-          <span class="badge gold">✨ 今日首选</span>
-          <span class="badge">匹配度 ${first.matchScore}</span>
-        </div>
-        <div class="res-top">
-          ${dishTile(first.dish, 'lg')}
-          <div class="grow">
-            <div class="res-name ellipsis">${escapeHtml(first.dish.name)}</div>
-            <div class="res-cuisine">${escapeHtml(first.dish.cuisine)} · ${first.dish.tags.map(escapeHtml).join(' / ') || '无标签'}</div>
-            ${resultMeta(first.dish)}
-          </div>
-        </div>
-        ${first.reasons.length ? `<div class="reasons">${first.reasons.map((r) => `<div class="reason">${escapeHtml(r)}</div>`).join('')}</div>` : ''}
-        <div class="actions-row">
-          <button class="btn btn-primary btn-block" data-action="eat" data-id="${first.dish.id}" ${state.recordedIds.has(first.dish.id) ? 'disabled' : ''}>
-            ${state.recordedIds.has(first.dish.id) ? '✓ 已记录' : '🍴 就吃它'}
-          </button>
-          <button class="btn btn-ghost" data-action="shuffle">换一批</button>
-        </div>
-      </div>
-
-      ${rest
-        .map(
-          (r, i) => `
-        <div class="res-row" style="--d:${(i + 1) * 0.1}s">
-          ${dishTile(r.dish, 'sm')}
-          <div class="grow">
-            <div class="res-name ellipsis">${escapeHtml(r.dish.name)}</div>
-            <div class="res-cuisine ellipsis">${escapeHtml(r.dish.cuisine)} · ¥${r.dish.price} · ${r.dish.cook}分 ${r.dish.spice ? '· ' + '🌶'.repeat(r.dish.spice) : ''}</div>
-          </div>
-          <button class="icon-btn" data-action="eat" data-id="${r.dish.id}" ${state.recordedIds.has(r.dish.id) ? 'disabled' : ''} title="就吃它">
-            ${state.recordedIds.has(r.dish.id) ? '✅' : '🍴'}
-          </button>
-        </div>
-      `
-        )
-        .join('')}
+      ${results.map(resultCard).join('')}
     </div>
   `;
 }
@@ -646,9 +632,6 @@ function renderDishes() {
       ${searchHtml}
       ${bodyHtml}
     </div>
-    <button class="fab" data-action="new-dish" aria-label="新增菜品">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-    </button>
   `;
 }
 
@@ -790,11 +773,16 @@ function accordion({ key, icon, title, summary, inner, open }) {
 
 function renderStats() {
   const s = state.stats;
+  const [year, month] = state.statsMonth.split('-');
 
   setAppbar({
     title: '统计',
     sub: '看看这个月吃了啥',
-    actions: `<input type="month" class="input" id="month-picker" style="width:auto;padding:8px 10px;font-size:13px;font-weight:700" value="${state.statsMonth}" />`
+    actions: `<button class="month-btn" data-action="open-month" aria-label="选择月份" title="选择月份">
+      <svg class="month-btn-ico" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="16" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>
+      <span>${year}年${Number(month)}月</span>
+      <svg class="month-btn-chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>`
   });
 
   if (!s) {
@@ -970,40 +958,95 @@ function openDishSheet(dish) {
       <label>主要食材（逗号分隔）</label>
       <input class="input" id="f-ingredients" value="${escapeHtml(d.ingredients.join('、'))}" placeholder="鸡蛋、番茄" />
     </div>
-    <div class="row" style="gap:10px;margin-top:2px">
-      <button class="btn btn-primary btn-block" data-action="save-dish" data-id="${d.id ?? ''}">保存</button>
+    <div class="sheet-actions">
+      <button class="btn btn-primary" data-action="save-dish" data-id="${d.id ?? ''}">保存</button>
       ${isNew ? '' : `<button class="btn btn-danger" data-action="delete-dish" data-id="${d.id}">删除</button>`}
     </div>
   `;
-  const panel = $('#sheet-panel');
-  panel.style.transform = '';
-  $('#sheet').classList.remove('hidden');
+  openSheet();
+}
+
+let sheetCloseTimer;
+const SHEET_CLOSE_MS = 260;
+
+function openSheet() {
+  clearTimeout(sheetCloseTimer);
+  $('#sheet-panel').style.transform = '';
+  $('#sheet').classList.remove('hidden', 'closing');
 }
 
 function closeSheet() {
-  $('#sheet').classList.add('hidden');
+  const mask = $('#sheet');
+  if (mask.classList.contains('hidden') || mask.classList.contains('closing')) return;
+  mask.classList.add('closing');
+  clearTimeout(sheetCloseTimer);
+  sheetCloseTimer = setTimeout(() => {
+    mask.classList.remove('closing');
+    mask.classList.add('hidden');
+  }, SHEET_CLOSE_MS);
+}
+
+function openMonthSheet() {
+  const year = state.pickerYear ?? Number(state.statsMonth.slice(0, 4));
+  const thisMonth = localMonth();
+  $('#sheet-title').textContent = '选择月份';
+  $('#sheet-body').innerHTML = `
+    <div class="month-pick">
+      <div class="year-nav">
+        <button class="year-nav-btn" data-action="month-year" data-value="-1" aria-label="上一年">‹</button>
+        <div class="year-label">${year}<span>年</span></div>
+        <button class="year-nav-btn" data-action="month-year" data-value="1" aria-label="下一年">›</button>
+      </div>
+      <div class="month-grid">
+        ${Array.from({ length: 12 }, (_, i) => {
+          const value = `${year}-${String(i + 1).padStart(2, '0')}`;
+          const on = value === state.statsMonth;
+          const isNow = value === thisMonth;
+          return `<button class="month-cell${on ? ' on' : ''}" data-action="pick-month" data-value="${value}">
+            <b>${i + 1}月</b>${isNow ? '<small>本月</small>' : ''}
+          </button>`;
+        }).join('')}
+      </div>
+      <button class="btn btn-ghost btn-block" data-action="month-this">回到本月</button>
+    </div>
+  `;
+  openSheet();
+}
+
+async function selectMonth(month) {
+  closeSheet();
+  if (month === state.statsMonth) return;
+
+  // 按月份先后决定滑动方向：往后月份从右侧进，往前从左侧进
+  const dir = month > state.statsMonth ? 1 : -1;
+  state.statsMonth = month;
+
+  const v = $('#view');
+  await playViewExit(v, dir);
+  v.scrollTop = 0;
+  state.viewDir = dir > 0 ? 'right' : 'left';
+  state.animateView = true;
+  await loadStats();
+  renderStats();
+  state.animateView = false;
+  state.viewDir = '';
 }
 
 function openSettingsSheet() {
-  const nativeHint = isNative()
-    ? '手机 App 需填写运行服务端的电脑/服务器地址（含 http:// 和端口）。'
-    : '留空表示使用当前网页地址。';
   $('#sheet-title').textContent = '设置';
   $('#sheet-body').innerHTML = `
     <div class="field">
-      <label>服务器地址</label>
-      <input class="input" id="s-api-base" placeholder="http://192.168.1.10:3000" value="${escapeHtml(API_BASE)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <label>服务器地址（可选）</label>
+      <input class="input" id="s-api-base" placeholder="留空即本机模式" value="${escapeHtml(API_BASE)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" />
     </div>
-    <div class="sub">${nativeHint}手机与服务器需在同一网络，或使用已部署的公网地址。</div>
-    <div class="sub">当前：${API_BASE ? escapeHtml(API_BASE) : '（同源）'}</div>
+    <div class="sub">留空时数据保存在本设备，离线也能用，不需要服务器。填写服务器地址（含 http:// 和端口）则改为联网模式。</div>
+    <div class="sub">当前：${API_BASE ? escapeHtml(API_BASE) + '（联网）' : '本机模式（数据存在此设备）'}</div>
     <div class="row" style="gap:10px;margin-top:2px">
       <button class="btn btn-primary btn-block" data-action="save-settings">保存</button>
       ${API_BASE ? '<button class="btn btn-ghost" data-action="reset-settings">重置</button>' : ''}
     </div>
   `;
-  const panel = $('#sheet-panel');
-  panel.style.transform = '';
-  $('#sheet').classList.remove('hidden');
+  openSheet();
 }
 
 function collectDishForm() {
@@ -1144,9 +1187,14 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
   }
 });
 
-// 顶栏设置入口
-$('#appbar-actions').addEventListener('click', (e) => {
-  if (e.target.closest('[data-action="open-settings"]')) openSettingsSheet();
+// 顶栏：设置入口与新增等操作
+$('#appbar-actions').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-action="open-settings"]')) {
+    openSettingsSheet();
+    return;
+  }
+  const el = e.target.closest('[data-action]');
+  if (el) await handleAction(el);
 });
 
 // 进场动画结束后移除标记类，避免后续交互（如摇一摇）重放整页动画
@@ -1156,13 +1204,7 @@ document.addEventListener('animationend', (e) => {
   }
 });
 
-$('#view').addEventListener('click', async (e) => {
-  // 点击展开的滑动项以外区域 -> 收起
-  const openSwipe = $('.swipe.open');
-  if (openSwipe && !e.target.closest('.swipe')) openSwipe.classList.remove('open');
-
-  const el = e.target.closest('[data-action]');
-  if (!el) return;
+async function handleAction(el) {
   const { action, value, key, id, score, set, acc } = el.dataset;
 
   try {
@@ -1209,6 +1251,21 @@ $('#view').addEventListener('click', async (e) => {
       renderDishes();
     } else if (action === 'new-dish') {
       openDishSheet(null);
+    } else if (action === 'open-month') {
+      state.pickerYear = Number(state.statsMonth.slice(0, 4));
+      openMonthSheet();
+      vibrate(6);
+    } else if (action === 'month-year') {
+      const base = state.pickerYear ?? Number(state.statsMonth.slice(0, 4));
+      state.pickerYear = base + Number(value);
+      openMonthSheet();
+      vibrate(6);
+    } else if (action === 'pick-month') {
+      await selectMonth(value);
+      vibrate(10);
+    } else if (action === 'month-this') {
+      await selectMonth(localMonth());
+      vibrate(10);
     } else if (action === 'edit-dish') {
       const dish = state.dishes.find((d) => d.id === Number(id));
       if (dish) openDishSheet(dish);
@@ -1245,6 +1302,15 @@ $('#view').addEventListener('click', async (e) => {
   } catch (err) {
     toast(err.message);
   }
+}
+
+$('#view').addEventListener('click', async (e) => {
+  // 点击展开的滑动项以外区域 -> 收起
+  const openSwipe = $('.swipe.open');
+  if (openSwipe && !e.target.closest('.swipe')) openSwipe.classList.remove('open');
+
+  const el = e.target.closest('[data-action]');
+  if (el) await handleAction(el);
 });
 
 // 输入：食材 / 搜索
@@ -1257,14 +1323,6 @@ $('#view').addEventListener('input', (e) => {
     const el = $('#dish-search');
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
-  }
-});
-
-$('#view').addEventListener('change', async (e) => {
-  if (e.target.id === 'month-picker') {
-    state.statsMonth = e.target.value;
-    await loadStats();
-    renderStats();
   }
 });
 
@@ -1283,7 +1341,7 @@ $('#sheet-body').addEventListener('click', async (e) => {
     if (value) localStorage.setItem('apiBase', value);
     else localStorage.removeItem('apiBase');
     closeSheet();
-    toast('已保存服务器地址');
+    toast(value ? '已切换为联网模式' : '已切换为本机模式');
     try {
       await loadMeta();
     } catch {
@@ -1296,13 +1354,18 @@ $('#sheet-body').addEventListener('click', async (e) => {
     localStorage.removeItem('apiBase');
     API_BASE = (CONFIG_BASE || '').replace(/\/+$/, '');
     closeSheet();
-    toast('已重置为默认地址');
+    toast(API_BASE ? '已重置为默认地址' : '已切换为本机模式');
     try {
       await loadMeta();
     } catch {
       toast('无法连接服务器');
     }
     refreshCurrent().catch(() => {});
+    return;
+  }
+  const actionEl = e.target.closest('[data-action]');
+  if (actionEl) {
+    await handleAction(actionEl);
     return;
   }
   const btn = e.target.closest('[data-toggle]');
@@ -1577,14 +1640,10 @@ function setupNativeBack() {
 }
 
 (async function init() {
-  if (isNative() && !API_BASE) {
-    toast('请先设置服务器地址');
-    openSettingsSheet();
-  }
   try {
     await loadMeta();
   } catch {
-    toast('无法连接服务器');
+    toast('数据初始化失败');
   }
   setupNativeBack();
   await switchTab('recommend');
